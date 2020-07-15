@@ -1,0 +1,219 @@
+/*
+ * Copyright ©2019 Hannah C Tang.  All rights reserved.  Permission is
+ * hereby granted to students registered for University of Washington
+ * CSE 333 for use solely during Autumn Quarter 2019 for purposes of
+ * the course.  No other use, copying, distribution, or modification
+ * is permitted without prior written consent. Copyrights for
+ * third-party components of this work must be honored.  Instructors
+ * interested in reusing these course materials should contact the
+ * author.
+ */
+
+#include <stdio.h>       // for snprintf()
+#include <unistd.h>      // for close(), fcntl()
+#include <sys/types.h>   // for socket(), getaddrinfo(), etc.
+#include <sys/socket.h>  // for socket(), getaddrinfo(), etc.
+#include <arpa/inet.h>   // for inet_ntop()
+#include <netdb.h>       // for getaddrinfo()
+#include <errno.h>       // for errno, used by strerror()
+#include <string.h>      // for memset, strerror()
+#include <iostream>      // for std::cerr, etc.
+
+#include "./ServerSocket.h"
+
+extern "C" {
+  #include "libhw1/CSE333.h"
+}
+
+namespace hw4 {
+
+ServerSocket::ServerSocket(uint16_t port) {
+  port_ = port;
+  listen_sock_fd_ = -1;
+}
+
+ServerSocket::~ServerSocket() {
+  // Close the listening socket if it's not zero.  The rest of this
+  // class will make sure to zero out the socket if it is closed
+  // elsewhere.
+  if (listen_sock_fd_ != -1)
+    close(listen_sock_fd_);
+  listen_sock_fd_ = -1;
+}
+
+bool ServerSocket::BindAndListen(int ai_family, int *listen_fd) {
+  // Use "getaddrinfo," "socket," "bind," and "listen" to
+  // create a listening socket on port port_.  Return the
+  // listening socket through the output parameter "listen_fd".
+
+  // STEP 1:
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(struct addrinfo));
+  hints.ai_family = ai_family;
+  hints.ai_socktype = SOCK_STREAM;  // listener
+  hints.ai_flags = AI_PASSIVE;  // this will be used in a call to bind
+  hints.ai_protocol = IPPROTO_TCP;  // TCP
+  hints.ai_canonname = nullptr;
+  hints.ai_addr = nullptr;
+  hints.ai_next = nullptr;
+  //
+  struct addrinfo *result;
+  int res = getaddrinfo(nullptr, (std::to_string(port_)).c_str(), &hints, &result);
+  if (res != 0) {
+    std::cerr << "getaddrinfo() failed" << std::endl;
+    std::cerr << gai_strerror(res) << std::endl;
+    return false;
+  }
+  // loop until able to create a socket -> bind
+  int ld = -1;
+  for (struct addrinfo *rp = result; rp != nullptr; rp = rp->ai_next) {
+    ld = socket(rp->ai_family,
+                rp->ai_socktype,
+                rp->ai_protocol);
+    if (ld == -1) {
+      std::cerr << "socket() failed: " << strerror(errno) << std::endl;
+      //ld = -1;
+      continue;
+    }
+    //
+    int optval = 1;
+    setsockopt(ld, SOL_SOCKET, SO_REUSEADDR,
+               &optval, sizeof(optval));
+    // try binding
+    if (bind(ld, rp->ai_addr, rp->ai_addrlen) == 0) {
+      // bind worked
+      *listen_fd = ld;
+      // set remaining class members
+      listen_sock_fd_ = ld;
+      sock_family_ = rp->ai_family;
+      break;
+    }
+    // bind failed, close socket, loop back, try next addr/port
+    close(ld);
+    ld = -1;
+  }  // end-for
+
+  // free struct
+  freeaddrinfo(result);
+  // bound?
+  if (ld == -1) {
+    return false;
+  }
+  // tell OS -> listening socket
+  if (listen(ld, SOMAXCONN) != 0) {
+    std::cerr << "Failed to mark socket as listening: "  
+              << strerror(errno) << std::endl;
+    close(ld);
+    return false;
+  }
+  //
+  return true;
+}
+
+bool ServerSocket::Accept(int *accepted_fd,
+                          std::string *client_addr,
+                          uint16_t *client_port,
+                          std::string *client_dnsname,
+                          std::string *server_addr,
+                          std::string *server_dnsname) {
+  // Accept a new connection on the listening socket listen_sock_fd_.
+  // (Block until a new connection arrives.)  Return the newly accepted
+  // socket, as well as information about both ends of the new connection,
+  // through the various output parameters.
+
+  // STEP 2:
+  bool r = true;
+  // block until connection arrives
+  while (1) {
+    struct sockaddr_storage caddr;
+    socklen_t caddr_len = sizeof(caddr);
+    int client_fd = accept(listen_sock_fd_, 
+                           reinterpret_cast<struct sockaddr *>(&caddr),
+                           &caddr_len);
+    if (client_fd < 0) {
+      if ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))
+	continue;
+      std::cerr << "Failure on accept: " << strerror(errno) << std::endl;
+      r = false;
+      break;
+    }
+    // have connection -> return info
+    struct sockaddr *addr = reinterpret_cast<struct sockaddr *>(&caddr);
+    std::string c_add, c_dns;
+    //
+    struct sockaddr server;
+    socklen_t server_len = sizeof(server);
+    if (getsockname(listen_sock_fd_, &server, &server_len) != 0) {
+      std::cout << "Error getting Server information" << std::endl;
+      r = false;
+      break;
+    }   
+    if (addr->sa_family == AF_INET) {
+      // IPV4
+      char astring[INET_ADDRSTRLEN];
+      struct sockaddr_in *in4 = reinterpret_cast<struct sockaddr_in *>(addr);
+      // convert IP from binary to text
+      inet_ntop(AF_INET, &(in4->sin_addr), astring, INET_ADDRSTRLEN);
+      std::cout << "IPV4 address: " << astring 
+                << "\nport #: " << ntohs(in4->sin_port) << std::endl;
+      *client_addr = astring;  // converted
+      *client_port = ntohs(in4->sin_port);  // converted
+      char hostname[1024];
+      if (getnameinfo(addr, caddr_len, hostname, 1024, nullptr, 0, 0) != 0) {
+       std::cout << "Problem resolving client host name" << std::endl;
+       r = false;
+      }
+      *client_dnsname = hostname;  // NOT CONVERTED
+      // server information
+      struct sockaddr_in *sin4 = reinterpret_cast<struct sockaddr_in *>(&server);
+      inet_ntop(AF_INET, &(sin4->sin_addr), astring, INET_ADDRSTRLEN);
+      *server_addr = astring;  // converted
+      if (getnameinfo(&server, server_len, hostname, 1024, nullptr, 0, 0) != 0) {
+	std::cout << "Problem resolving server host name" << std::endl;
+	r = false;
+      }
+      *server_dnsname = hostname;  // NOT CONVERTED
+      *accepted_fd = client_fd;
+      break; 
+   } else if (addr->sa_family == AF_INET6) {
+      // IPV6
+      char astring[INET6_ADDRSTRLEN];
+      struct sockaddr_in6 *in6 = reinterpret_cast<struct sockaddr_in6 *>(addr);
+      inet_ntop(AF_INET6, &(in6->sin6_addr), astring, INET6_ADDRSTRLEN);
+      std::cout << "IPV6 address: " << astring 
+                << "\nport #: " << ntohs(in6->sin6_port) << std::endl; 
+      *client_addr = astring;  // converted
+      *client_port = ntohs(in6->sin6_port);  // converted
+      char hostname[1024];
+      r &= Accept_GNI(addr, caddr_len, hostname, 1024, nullptr, 0, 0);
+
+      if (getnameinfo(addr, caddr_len, hostname, 1024, nullptr, 0, 0, "prob) != 0) {
+	std::cout << "Problem resolving client host name" << std::endl;//---------------
+       r = false;
+      }
+      *client_dnsname = hostname;  // NOT CONVERTED
+      // server information
+      struct sockaddr_in6 *sin6 = reinterpret_cast<struct sockaddr_in6 *>(&server);
+      inet_ntop(AF_INET6, &(sin6->sin6_addr), astring, INET6_ADDRSTRLEN);//------------------
+      *server_addr = astring;  // NOT CONVERTED
+      if (getnameinfo(&server, server_len, hostname, 1024, nullptr, 0, 0) != 0) {
+	std::cout << "Problem resolving server hose name" << std::endl;
+	r = false;
+      }
+      *server_dnsname = hostname;  // NOT CONVERTED
+      *accepted_fd = client_fd;
+      break;
+    } else {
+      // error
+      r = false;
+      break;
+    }
+  }  // end-while
+  return r;
+}
+
+bool Accept_GNI(struct sockaddr *addr, socklen_t caddr_len, char *hostname, int i, int j) {
+
+
+}
+}  // namespace hw4
