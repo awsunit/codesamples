@@ -10,3 +10,10 @@
     - Developed data structures and logic to support the construction, storage, and iteration of index files.
     - Extended Socket class for use in a client-server relationship.
     - Integrated code into existing framework.
+
+## Naive Bayes:
+1. Info
+    - small file containing a bayes classifier implementation
+    - more than happy to submit something else, figured a single file might be welcomed after g33gle.
+2. Role
+    - entire implementation
