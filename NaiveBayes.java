@@ -1,6 +1,4 @@
 
-// Do not submit with package statements if you are using eclipse.
-// Only use what is provided in the standard libraries.
 
 import java.io.*;
 import java.util.HashSet;
@@ -19,14 +17,7 @@ public class NaiveBayes {
 	Map<String, Integer> spamMap = new TreeMap<String, Integer>();
 
 	/*
-	 * !! DO NOT CHANGE METHOD HEADER !! If you change the method header here, our
-	 * grading script won't work and you will lose points!
-	 * 
-	 * Train your Naive Bayes Classifier based on the given training ham and spam
-	 * emails.
-	 *
-	 * Params: hams - email files labeled as 'ham' spams - email files labeled as
-	 * 'spam'
+	 * !! DO NOT CHANGE METHOD HEADER !! 
 	 */
 	public void train(File[] hams, File[] spams) throws IOException {
 
@@ -68,15 +59,12 @@ public class NaiveBayes {
 	}
 
 	/*
-	 * !! DO NOT CHANGE METHOD HEADER !! If you change the method header here, our
-	 * grading script won't work and you will lose points!
+	 * !! DO NOT CHANGE METHOD HEADER !! 
 	 *
 	 * Classify the given unlabeled set of emails. Follow the format in
 	 * example_output.txt and output your result to stdout. Note the order of the
 	 * emails in the output does NOT matter.
 	 * 
-	 * Do NOT directly process the file paths, to get the names of the email files,
-	 * check out File's getName() function.
 	 *
 	 * Params: emails - unlabeled email files to be classified
 	 */
